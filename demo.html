@@ -1,0 +1,202 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Python openCV + VideoFrame js</title>
+
+</head>
+<body>
+
+
+<div id="theater" style="position: relative">
+  <br>
+  <video id="video" ></video>
+
+  <canvas id="canvas"  style="border:1px solid #000000;cursor:crosshair;position: absolute;top: 16px;left: 0">
+
+
+  </canvas>
+  <label>
+    <br />press space to play/pause</label>
+  <br />
+</div>
+<button onclick=sendData()>TRACK</button>
+<div>
+  <input id="input" type="url" >
+  <button id="input-button">use video</button>
+</div>
+<script src="https://rawgit.com/allensarkisyan/VideoFrame/master/VideoFrame.min.js"></script>
+<script type="text/javascript">
+  var canvas = document.getElementById('canvas');
+  var input = document.getElementById('input');
+  var inputButton = document.getElementById('input-button');
+  var ctx = canvas.getContext('2d');
+  var video = document.getElementById('video');
+  let storedRects;
+  let URL;
+  const isVideoPlaying = video => !!(video.currentTime > 0 && !video.paused && !video.ended && video.readyState > 2);
+
+  var videoFrame = VideoFrame({
+    id: 'video',
+    frameRate: FrameRates.film,
+  });
+  var http = new XMLHttpRequest();
+
+  inputButton.onclick = function (){
+    URL = input.value
+    video.src = URL
+  }
+
+  window.onkeyup = function(e){
+    if (e.code === 'Space'){
+      if(isVideoPlaying(video)){
+        video.pause();
+      } else {
+        video.play();
+      }
+    }
+  }
+  // set canvas size = video size when known
+  video.addEventListener('loadedmetadata', function() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  });
+
+  video.addEventListener('play', function() {
+    var $this = this; //cache
+    (function loop() {
+      if (!$this.paused && !$this.ended) {
+        ctx.drawImage($this, 0, 0);
+        setTimeout(loop, 1000 / 30); // drawing at 30fps
+      }
+    })();
+  }, 0);
+
+  requestAnimationFrame(mainLoop);
+  const baseImage = loadImage(canvas.toDataURL('image/png'));
+  var refresh = true;
+  const rect = (() => {
+    var x1, y1, x2, y2;
+    var show = false;
+    function fix() {
+      rect.x = Math.min(x1, x2);
+      rect.y = Math.min(y1, y2);
+      rect.w = Math.max(x1, x2) - Math.min(x1, x2);
+      rect.h = Math.max(y1, y2) - Math.min(y1, y2);
+    }
+    function draw(ctx) { ctx.strokeRect(this.x, this.y, this.w, this.h) }
+    const rect = {x : 0, y : 0, w : 0, h : 0,  draw};
+    const API = {
+      restart(point) {
+        x2 = x1 = point.x;
+        y2 = y1 = point.y;
+        fix();
+        show = true;
+      },
+      update(point) {
+        x2 = point.x;
+        y2 = point.y;
+        fix();
+        show = true;
+      },
+      toRect() {
+        show = false;
+        return Object.assign({}, rect);
+      },
+      draw(ctx) {
+        if (show) { rect.draw(ctx) }
+      },
+      show : false,
+    }
+    return API;
+  })();
+
+  function loadImage(url) {
+    const image = new Image();
+    image.src = url;
+    image.onload = () => refresh = true;
+    return image;
+  }
+
+  const mouse = {
+    button : false,
+    x : 0,
+    y : 0,
+    down : false,
+    up : false,
+    element : null,
+    event(e) {
+      const m = mouse;
+      m.bounds = m.element.getBoundingClientRect();
+      m.x = e.pageX - m.bounds.left - scrollX;
+      m.y = e.pageY - m.bounds.top - scrollY;
+      const prevButton = m.button;
+      m.button = e.type === "mousedown" ? true : e.type === "mouseup" ? false : mouse.button;
+      if (!prevButton && m.button) { m.down = true }
+      if (prevButton && !m.button) { m.up = true }
+    },
+    start(element) {
+      mouse.element = element;
+      "down,up,move".split(",").forEach(name => canvas.addEventListener("mouse" + name, mouse.event));
+    }
+  }
+
+  mouse.start(canvas);
+  function draw() {
+    ctx.drawImage(baseImage, 0, 0, ctx.canvas.width, ctx.canvas.width);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "green";
+    ctx.strokeStyle = "blue";
+    rect.draw(ctx);
+  }
+  function mainLoop() {
+    if (refresh || mouse.down || mouse.up || mouse.button) {
+      refresh = false;
+      if (mouse.down) {
+        mouse.down = false;
+        rect.restart(mouse);
+      } else if (mouse.button) {
+        rect.update(mouse);
+      } else if (mouse.up) {
+        mouse.up = false;
+        rect.update(mouse);
+        storedRects= rect.toRect();
+        storedRects.frameTimeMs = videoFrame.toFrames();
+      }
+      draw();
+    }
+    requestAnimationFrame(mainLoop)
+  }
+
+
+  const sendData = () => {
+    const { x, y, w, h, frameTimeMs } = storedRects;
+    let data = {
+      xx: x,
+      xy: y,
+      yy: w,
+      yx: h,
+      frame: frameTimeMs,
+    }
+
+
+    var url = 'http://localhost:3000/process';
+
+    http.open('POST', url, true);
+
+    //Send the proper header information along with the request
+    http.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    http.setRequestHeader("Accept", "*/*");
+    http.setRequestHeader("Access-Control-Allow-Origin", "*");
+
+    http.send(JSON.stringify({
+      url: URL,
+      data,
+    }));
+  }
+
+</script>
+</body>
+</html>
